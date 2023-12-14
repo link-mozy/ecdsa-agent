@@ -52,7 +52,7 @@ pub fn run(
     
     let sv_info = sv.server_info.clone();
 
-    let sv_handle = rt.spawn(server::run_server(server_exit_rx, sv, port));
+    let sv_handle = rt.spawn(server::run_server(server_exit_rx, sv, port.clone()));
 
     // listen exit signal
     rt.block_on(listen_exit_signal());
@@ -77,7 +77,7 @@ pub fn run(
     });
 
     // del file lock
-    utils::del_file_lock();
+    utils::del_file_lock(&port);
     rt.shutdown_background();
     info!("server main process exited")
 }

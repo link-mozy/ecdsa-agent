@@ -7,14 +7,14 @@ use std::{
     process,
 };
 
-pub fn is_file_lock_exist() -> bool {
-    let lock_path = lock_file_path();
+pub fn is_file_lock_exist(port: &str) -> bool {
+    let lock_path = lock_file_path(port);
     info!("lock_path: {:?}", lock_path.clone().as_path());
     Path::new(lock_path.as_path()).exists()
 }
 
-pub fn check_process_is_running_by_pid() -> Option<u32> {
-    let lock_path = lock_file_path().to_str().unwrap().to_string();
+pub fn check_process_is_running_by_pid(port: &str) -> Option<u32> {
+    let lock_path = lock_file_path(port).to_str().unwrap().to_string();
     let pid = read_pid(lock_path);
     if pid == 0 {
         None
@@ -40,8 +40,8 @@ pub fn check_process_is_running_by_pid() -> Option<u32> {
     }
 }
 
-pub fn write_pid_into_file_lock(pid: &Vec<u8>) -> Result<(), anyhow::Error> {
-    let lock_path = lock_file_path();
+pub fn write_pid_into_file_lock(port: &str, pid: &Vec<u8>) -> Result<(), anyhow::Error> {
+    let lock_path = lock_file_path(port);
     let result = write(lock_path, pid);
     match result {
         Ok(_) => Ok(()),
@@ -49,8 +49,8 @@ pub fn write_pid_into_file_lock(pid: &Vec<u8>) -> Result<(), anyhow::Error> {
     }
 }
 
-pub fn del_file_lock() {
-    let lock_path = lock_file_path();
+pub fn del_file_lock(port: &str) {
+    let lock_path = lock_file_path(port);
     match remove_file(lock_path) {
         Ok(_) => {}
         Err(e) => {
@@ -59,8 +59,9 @@ pub fn del_file_lock() {
     }
 }
 
-pub fn lock_file_path() -> PathBuf {
-    dirs::home_dir().unwrap().join(".fil_ecdsa_agt_server.lock")   
+pub fn lock_file_path(port: &str) -> PathBuf {
+    let path = format!(".fil_ecdsa_agt_server_{}.lock", port);
+    dirs::home_dir().unwrap().join(path)
 }
 
 pub fn read_pid(path: String) -> u32 {
