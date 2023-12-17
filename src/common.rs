@@ -6,14 +6,12 @@ use aes_gcm::aead::{Aead, NewAead};
 use aes_gcm::{Aes256Gcm, Nonce};
 use rand::{rngs::OsRng, RngCore};
 
-use curv::{
-    arithmetic::traits::Converter,
-    elliptic::curves::{secp256_k1::Secp256k1, Point, Scalar},
-    BigInt,
-};
-
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+
+use crate::ecdsa_agent_grpc::InfoAgent;
+use crate::ecdsa_manager_grpc::SetRequest;
+use crate::ecdsa_manager_grpc::ecdsa_manager_service_client::EcdsaManagerServiceClient;
 
 pub type Key = String;
 
@@ -48,6 +46,12 @@ pub struct Params {
     pub parties: String,
     pub threshold: String,
 }
+
+// #[derive(Debug, Serialize, Deserialize)]
+// pub struct InfoAgent {
+//     pub party_num: u32,
+//     pub url: String,
+// }
 
 #[allow(dead_code)]
 pub fn aes_encrypt(key: &[u8], plaintext: &[u8]) -> AEAD {
@@ -101,18 +105,41 @@ where
     None
 }
 
+pub async fn set(url: &str, key: &str, value: &str) -> String {
+    let clinet = EcdsaManagerServiceClient::connect(format!("http://{}", url)).await;
+    let request = tonic::Request::new(SetRequest {
+        key: key.to_string(),
+        value: value.to_string(),
+    });
+    let response = clinet.expect("EcdsaManagerServiceClient Connect Error.").set(request).await;
+    response.expect("REASON").into_inner().msg
+}
+
+// pub fn broadcast(
+//     client: &Client,
+//     party_num: u16,
+//     round: &str,
+//     data: String,
+//     sender_uuid: String,
+// ) -> Result<(), ()> {
+//     let key = format!("{}-{}-{}", party_num, round, sender_uuid);
+//     let entry = Entry { key, value: data };
+
+//     let res_body = postb(client, "set", entry).unwrap();
+//     serde_json::from_str(&res_body).unwrap()
+// }
+
 pub fn broadcast(
-    client: &Client,
+    url: &str,
     party_num: u16,
     round: &str,
     data: String,
     sender_uuid: String,
-) -> Result<(), ()> {
+) -> String {
     let key = format!("{}-{}-{}", party_num, round, sender_uuid);
-    let entry = Entry { key, value: data };
-
-    let res_body = postb(client, "set", entry).unwrap();
-    serde_json::from_str(&res_body).unwrap()
+    // let entry = Entry { key: key.clone(), value: data.clone() };
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(set(&url, &key, &data))
 }
 
 pub fn sendp2p(
@@ -134,7 +161,7 @@ pub fn sendp2p(
 pub fn poll_for_broadcasts(
     client: &Client,
     party_num: u16,
-    n: u16,
+    n: u16, // PARTIES
     delay: Duration,
     round: &str,
     sender_uuid: String,
@@ -156,6 +183,21 @@ pub fn poll_for_broadcasts(
                 }
             }
         }
+    }
+    ans_vec
+}
+
+pub fn poll_for_broadcasts_new (
+    url: &str,
+    party_num: u16,
+    info_agents: Vec<InfoAgent>, // n: u16, // PARTIES
+    round: &str,
+    data: String,
+    sender_uuid: String,
+) -> Vec<String> {
+    let mut ans_vec = Vec::new();
+    for info_agent in info_agents.iter().enumerate() {
+        println!("info_agnet: {:?}", info_agent)
     }
     ans_vec
 }
@@ -187,39 +229,4 @@ pub fn poll_for_p2p(
         }
     }
     ans_vec
-}
-
-pub fn check_sig(
-    r: &Scalar<Secp256k1>,
-    s: &Scalar<Secp256k1>,
-    msg: &BigInt,
-    pk: &Point<Secp256k1>,
-) {
-    use secp256k1::{Message, PublicKey, Signature, SECP256K1};
-
-    let raw_msg = BigInt::to_bytes(msg);
-    let mut msg: Vec<u8> = Vec::new(); // padding
-    msg.extend(vec![0u8; 32 - raw_msg.len()]);
-    msg.extend(raw_msg.iter());
-
-    let msg = Message::from_slice(msg.as_slice()).unwrap();
-    let mut raw_pk = pk.to_bytes(false).to_vec();
-    if raw_pk.len() == 64 {
-        raw_pk.insert(0, 4u8);
-    }
-    let pk = PublicKey::from_slice(&raw_pk).unwrap();
-
-    let mut compact: Vec<u8> = Vec::new();
-    let bytes_r = &r.to_bytes().to_vec();
-    compact.extend(vec![0u8; 32 - bytes_r.len()]);
-    compact.extend(bytes_r.iter());
-
-    let bytes_s = &s.to_bytes().to_vec();
-    compact.extend(vec![0u8; 32 - bytes_s.len()]);
-    compact.extend(bytes_s.iter());
-
-    let secp_sig = Signature::from_compact(compact.as_slice()).unwrap();
-
-    let is_correct = SECP256K1.verify(&msg, &secp_sig, &pk).is_ok();
-    assert!(is_correct);
 }

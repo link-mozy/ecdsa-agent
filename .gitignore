@@ -26,4 +26,4 @@ Cargo.lock
 .history/
 
 # proto
-src/ecdsa_agent_grpc.rs
+src/*_grpc.rs

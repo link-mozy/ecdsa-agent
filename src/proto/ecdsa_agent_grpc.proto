@@ -2,9 +2,17 @@ syntax = "proto3";
 
 package ecdsa_agent_grpc;
 
+message InfoAgent {
+    string party_num = 1;
+    string url = 2;
+}
+
 message RunKeygenRequest {
     string uuid = 1;
     string party_number = 2;
+    string threshold = 3;
+    string parties = 4;
+    repeated InfoAgent info_agents = 5;
 }
 
 message GetKeyRequest {

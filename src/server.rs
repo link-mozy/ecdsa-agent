@@ -1,6 +1,6 @@
 use crate::error;
-use crate::common::Key;
-use crate::ecdsa_agent_grpc::{RunKeygenRequest, GetKeyRequest, BaseResponse};
+use crate::common::{Key, broadcast};
+use crate::ecdsa_agent_grpc::{RunKeygenRequest, GetKeyRequest, BaseResponse, InfoAgent};
 use crate::ecdsa_agent_grpc::ecdsa_agent_service_server::{EcdsaAgentService, EcdsaAgentServiceServer};
 use crate::status::{ServerStatus};
 
@@ -11,10 +11,14 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use log::info;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot};
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 use futures::future::FutureExt;
+
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::{
+    KeyGenBroadcastMessage1, KeyGenDecommitMessage1, Keys, Parameters,
+};
 
 pub const SERVER_LOCK_TIME_OUT_DEFAULT: Duration = Duration::from_secs(10);
 pub const SERVER_TASK_GET_BACK_TIME_OUT_DEFAULT: Duration = Duration::from_secs(60);
@@ -246,9 +250,58 @@ impl EcdsaAgentService for EcdsaAgentServer {
         let req = request.into_inner();
         let uuid = req.uuid;
         let party_number: i32 = <i32 as FromStr>::from_str(&req.party_number).unwrap();
+        let threshold: u16 = <u16 as FromStr>::from_str(&req.threshold).unwrap();
+        let parties: u16 = <u16 as FromStr>::from_str(&req.threshold).unwrap();
+        let info_agents: Vec<InfoAgent> = req.info_agents;
         let mut si = self.server_info.lock().unwrap();
         let mut hm = si.storage.write().unwrap();
         hm.insert(uuid.clone(), party_number.to_string());
+
+        let server_url = "http://127.0.0.1:4500";
+
+        //////////// start ///////////// 
+        // addr: &String, keysfile_path: &String, params: &Vec<&str>
+        // let client = Client::new();
+
+        // delay:
+        // let delay = time::Duration::from_millis(25);
+        // let params = Parameters {
+        //     threshold: THRESHOLD,
+        //     share_count: PARTIES,
+        // };
+        //signup:
+        // let tn_params = Params {
+        //     threshold: THRESHOLD.to_string(),
+        //     parties: PARTIES.to_string(),
+        // };
+        // let (party_num_int, uuid) = match keygen_signup(&addr, &client, &tn_params).unwrap() {
+        //     PartySignup { number, uuid } => (number, uuid),
+        // };
+        let party_keys = Keys::create(party_number as usize);
+        let (bc_i, decom_i) = party_keys.phase1_broadcast_phase3_proof_of_correct_key();
+
+        // send commitment to ephemeral public keys, get round 1 commitments of other parties
+        // let addr = "127.0.0.1:8001";
+        // let client = Client::new();
+        // assert!(broadcast(
+        //     &addr,
+        //     &client,
+        //     party_num,
+        //     "round1",
+        //     serde_json::to_string(&bc_i).unwrap(),
+        //     uuid.clone(),
+        // )
+        // .is_ok());
+        
+
+        broadcast(
+            &server_url, 
+            party_number.try_into().unwrap(), 
+            "round1", 
+            serde_json::to_string(&bc_i).unwrap(),
+            uuid.clone(),
+        );
+
         
         println!("run_keygent call!! uuid: {:?}, party_number: {:?}", uuid, party_number);
         let msg = format!("success! (uuid: {uuid}, party_number: {party_number})");

@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package ecdsa_manager_grpc;
+
+message SetRequest {
+    string key = 1;
+    string value = 2;
+}
+
+message GetRequest {
+    string key = 1;
+}
+
+message EmptyRequest {}
+
+message BaseResponse {
+    string msg = 1;
+}
+
+service EcdsaManagerService {
+    rpc Set(SetRequest) returns (BaseResponse) {};
+    rpc Get(GetRequest) returns (BaseResponse) {};
+    rpc Keygen(EmptyRequest) returns (BaseResponse) {};
+}
