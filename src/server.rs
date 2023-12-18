@@ -257,7 +257,14 @@ impl EcdsaAgentService for EcdsaAgentServer {
         let mut hm = si.storage.write().unwrap();
         hm.insert(uuid.clone(), party_number.to_string());
 
-        let server_url = "http://127.0.0.1:4500";
+        println!("debug::run_keygen::request info:");
+        println!("uuid: {:?}", uuid);
+        println!("party_number: {:?}", party_number);
+        println!("threshold: {:?}", threshold);
+        println!("parties: {:?}", parties);
+        println!("info_agents: {:?}", info_agents);
+
+        let server_url = "127.0.0.1:4500";
 
         //////////// start ///////////// 
         // addr: &String, keysfile_path: &String, params: &Vec<&str>
@@ -292,8 +299,6 @@ impl EcdsaAgentService for EcdsaAgentServer {
         //     uuid.clone(),
         // )
         // .is_ok());
-        
-
         broadcast(
             &server_url, 
             party_number.try_into().unwrap(), 
@@ -301,6 +306,15 @@ impl EcdsaAgentService for EcdsaAgentServer {
             serde_json::to_string(&bc_i).unwrap(),
             uuid.clone(),
         );
+        // let round1_ans_vec = poll_for_broadcasts(
+        //     &addr,
+        //     &client,
+        //     party_num_int,
+        //     PARTIES,
+        //     delay,
+        //     "round1",
+        //     uuid.clone(),
+        // );
 
         
         println!("run_keygent call!! uuid: {:?}, party_number: {:?}", uuid, party_number);

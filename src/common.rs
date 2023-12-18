@@ -4,10 +4,13 @@ use std::{env, thread, time, time::Duration};
 
 use aes_gcm::aead::{Aead, NewAead};
 use aes_gcm::{Aes256Gcm, Nonce};
+use futures::executor::block_on;
 use rand::{rngs::OsRng, RngCore};
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Handle;
+use tokio::task;
 
 use crate::ecdsa_agent_grpc::InfoAgent;
 use crate::ecdsa_manager_grpc::SetRequest;
@@ -111,23 +114,10 @@ pub async fn set(url: &str, key: &str, value: &str) -> String {
         key: key.to_string(),
         value: value.to_string(),
     });
+    println!("debug::set call!!");
     let response = clinet.expect("EcdsaManagerServiceClient Connect Error.").set(request).await;
     response.expect("REASON").into_inner().msg
 }
-
-// pub fn broadcast(
-//     client: &Client,
-//     party_num: u16,
-//     round: &str,
-//     data: String,
-//     sender_uuid: String,
-// ) -> Result<(), ()> {
-//     let key = format!("{}-{}-{}", party_num, round, sender_uuid);
-//     let entry = Entry { key, value: data };
-
-//     let res_body = postb(client, "set", entry).unwrap();
-//     serde_json::from_str(&res_body).unwrap()
-// }
 
 pub fn broadcast(
     url: &str,
@@ -137,9 +127,10 @@ pub fn broadcast(
     sender_uuid: String,
 ) -> String {
     let key = format!("{}-{}-{}", party_num, round, sender_uuid);
-    // let entry = Entry { key: key.clone(), value: data.clone() };
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(set(&url, &key, &data))
+    println!("debug::broadcast call!");
+    task::block_in_place(|| {
+        Handle::current().block_on(set(&url, &key, &data))
+    })
 }
 
 pub fn sendp2p(
