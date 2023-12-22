@@ -1,5 +1,5 @@
 use crate::error;
-use crate::common::{Key, broadcast};
+use crate::common::{Key, broadcast, poll};
 use crate::ecdsa_agent_grpc::{RunKeygenRequest, GetKeyRequest, BaseResponse, InfoAgent};
 use crate::ecdsa_agent_grpc::ecdsa_agent_service_server::{EcdsaAgentService, EcdsaAgentServiceServer};
 use crate::status::{ServerStatus};
@@ -266,39 +266,12 @@ impl EcdsaAgentService for EcdsaAgentServer {
 
         let server_url = "127.0.0.1:4500";
 
-        //////////// start ///////////// 
-        // addr: &String, keysfile_path: &String, params: &Vec<&str>
-        // let client = Client::new();
-
         // delay:
-        // let delay = time::Duration::from_millis(25);
-        // let params = Parameters {
-        //     threshold: THRESHOLD,
-        //     share_count: PARTIES,
-        // };
-        //signup:
-        // let tn_params = Params {
-        //     threshold: THRESHOLD.to_string(),
-        //     parties: PARTIES.to_string(),
-        // };
-        // let (party_num_int, uuid) = match keygen_signup(&addr, &client, &tn_params).unwrap() {
-        //     PartySignup { number, uuid } => (number, uuid),
-        // };
+        let delay = Duration::from_millis(25);
         let party_keys = Keys::create(party_number as usize);
         let (bc_i, decom_i) = party_keys.phase1_broadcast_phase3_proof_of_correct_key();
 
         // send commitment to ephemeral public keys, get round 1 commitments of other parties
-        // let addr = "127.0.0.1:8001";
-        // let client = Client::new();
-        // assert!(broadcast(
-        //     &addr,
-        //     &client,
-        //     party_num,
-        //     "round1",
-        //     serde_json::to_string(&bc_i).unwrap(),
-        //     uuid.clone(),
-        // )
-        // .is_ok());
         broadcast(
             &server_url, 
             party_number.try_into().unwrap(), 
@@ -306,18 +279,18 @@ impl EcdsaAgentService for EcdsaAgentServer {
             serde_json::to_string(&bc_i).unwrap(),
             uuid.clone(),
         );
-        // let round1_ans_vec = poll_for_broadcasts(
-        //     &addr,
-        //     &client,
-        //     party_num_int,
-        //     PARTIES,
-        //     delay,
-        //     "round1",
-        //     uuid.clone(),
-        // );
-
+        
+        let round1_ans_vec = poll(
+            &server_url, 
+            party_number.try_into().unwrap(), 
+            info_agents, 
+            delay, 
+            "round1", 
+            uuid.clone(),
+        );
         
         println!("run_keygent call!! uuid: {:?}, party_number: {:?}", uuid, party_number);
+        println!("round1_ans_vec: {:?}", round1_ans_vec);
         let msg = format!("success! (uuid: {uuid}, party_number: {party_number})");
         Ok(Response::new(BaseResponse { msg: msg.to_string() }))
     }
