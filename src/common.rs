@@ -1,19 +1,22 @@
 #![allow(dead_code)]
 
+use std::str::FromStr;
 use std::{env, thread, time, time::Duration};
 
 use aes_gcm::aead::{Aead, NewAead};
 use aes_gcm::{Aes256Gcm, Nonce};
 use futures::executor::block_on;
+use log::info;
 use rand::{rngs::OsRng, RngCore};
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::runtime::Handle;
 use tokio::task;
 
 use crate::ecdsa_agent_grpc::InfoAgent;
-use crate::ecdsa_manager_grpc::SetRequest;
+use crate::ecdsa_manager_grpc::{SetRequest, GetRequest};
 use crate::ecdsa_manager_grpc::ecdsa_manager_service_client::EcdsaManagerServiceClient;
 
 pub type Key = String;
@@ -48,6 +51,12 @@ pub struct Entry {
 pub struct Params {
     pub parties: String,
     pub threshold: String,
+}
+
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct ResponseMsg {
+    pub status: String,
+    pub value: String,
 }
 
 // #[derive(Debug, Serialize, Deserialize)]
@@ -114,9 +123,21 @@ pub async fn set(url: &str, key: &str, value: &str) -> String {
         key: key.to_string(),
         value: value.to_string(),
     });
+    info!("set call");
     println!("debug::set call!!");
     let response = clinet.expect("EcdsaManagerServiceClient Connect Error.").set(request).await;
-    response.expect("REASON").into_inner().msg
+    response.expect("EcdsaManagerServiceClient get error.").into_inner().msg
+}
+
+pub async fn get(url: &str, key: &str) -> ResponseMsg {
+    let clinet = EcdsaManagerServiceClient::connect(format!("http://{}", url)).await;
+    let request = tonic::Request::new(GetRequest {
+        key: key.to_string(),
+    });
+    info!("get(key: {}) call", key);
+    let response = clinet.expect("EcdsaManagerServiceClient connect error.").get(request).await;
+    let msg = response.expect("EcdsaManagerServiceClient get error.").into_inner().msg;
+    serde_json::from_str(&msg).expect("response parse error.")
 }
 
 pub fn broadcast(
@@ -149,27 +170,26 @@ pub fn sendp2p(
     serde_json::from_str(&res_body).unwrap()
 }
 
-pub fn poll_for_broadcasts(
-    client: &Client,
+pub async fn poll_for_broadcasts (
+    url: &str,
     party_num: u16,
-    n: u16, // PARTIES
+    info_agents: Vec<InfoAgent>, // n: u16, // PARTIES
     delay: Duration,
     round: &str,
     sender_uuid: String,
 ) -> Vec<String> {
     let mut ans_vec = Vec::new();
-    for i in 1..=n {
-        if i != party_num {
-            let key = format!("{}-{}-{}", i, round, sender_uuid);
-            let index = Index { key };
+
+    for (_, info_agent) in info_agents.iter().enumerate() {
+        let agent_party_num = <u16 as FromStr>::from_str(&info_agent.party_num).unwrap();
+        if agent_party_num != party_num {
+            let key = format!("{}-{}-{}", agent_party_num, round, sender_uuid);
             loop {
-                // add delay to allow the server to process request:
                 thread::sleep(delay);
-                let res_body = postb(client, "get", index.clone()).unwrap();
-                let answer: Result<Entry, ()> = serde_json::from_str(&res_body).unwrap();
-                if let Ok(answer) = answer {
-                    ans_vec.push(answer.value);
-                    println!("[{:?}] party {:?} => party {:?}", round, i, party_num);
+                let msg: ResponseMsg = get(&url, &key).await;
+                if msg.status == "success" {
+                    ans_vec.push(msg.value);
+                    println!("[{:?}] party {:?} => party {:?}", round, agent_party_num, party_num);
                     break;
                 }
             }
@@ -178,19 +198,19 @@ pub fn poll_for_broadcasts(
     ans_vec
 }
 
-pub fn poll_for_broadcasts_new (
+pub fn poll (
     url: &str,
     party_num: u16,
     info_agents: Vec<InfoAgent>, // n: u16, // PARTIES
+    delay: Duration,
     round: &str,
-    data: String,
     sender_uuid: String,
 ) -> Vec<String> {
-    let mut ans_vec = Vec::new();
-    for info_agent in info_agents.iter().enumerate() {
-        println!("info_agnet: {:?}", info_agent)
-    }
-    ans_vec
+    task::block_in_place( || {
+        Handle::current().block_on(
+            poll_for_broadcasts(&url, party_num, info_agents, delay, &round, sender_uuid)
+        )
+    })
 }
 
 pub fn poll_for_p2p(
