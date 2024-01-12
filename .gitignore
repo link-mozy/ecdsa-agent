@@ -27,3 +27,6 @@ Cargo.lock
 
 # proto
 src/*_grpc.rs
+
+# key file
+*.store

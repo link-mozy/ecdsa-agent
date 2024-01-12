@@ -25,6 +25,5 @@ message BaseResponse {
 
 service EcdsaAgentService {
     rpc RunKeygen(RunKeygenRequest) returns (BaseResponse) {};
-    rpc GetAeadPack(GetKeyRequest) returns (BaseResponse) {};
-    rpc GetKeygenInfo(GetKeyRequest) returns (BaseResponse) {};
+    rpc GetKey(GetKeyRequest) returns (BaseResponse) {};
 }

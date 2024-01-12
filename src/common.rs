@@ -1,21 +1,25 @@
 #![allow(dead_code)]
+use std::{
+    str::FromStr,
+    time::Duration,
+    thread,
+};
+use aes_gcm::{
+    Nonce,
+    Aes256Gcm,
+    aead::{Aead, NewAead},
+};
+use tokio::{
+    runtime::Handle,
+    task,
+};
 
-use std::str::FromStr;
-use std::{env, thread, time, time::Duration};
-
-use aes_gcm::aead::{Aead, NewAead};
-use aes_gcm::{Aes256Gcm, Nonce};
-use futures::executor::block_on;
-use log::info;
+use log::{info, debug};
 use rand::{rngs::OsRng, RngCore};
-
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use tokio::runtime::Handle;
-use tokio::task;
 
-use crate::ecdsa_agent_grpc::InfoAgent;
+use crate::ecdsa_agent_grpc::{InfoAgent, GetKeyRequest, BaseResponse};
+use crate::ecdsa_agent_grpc::ecdsa_agent_service_client::EcdsaAgentServiceClient;
 use crate::ecdsa_manager_grpc::{SetRequest, GetRequest};
 use crate::ecdsa_manager_grpc::ecdsa_manager_service_client::EcdsaManagerServiceClient;
 
@@ -59,11 +63,11 @@ pub struct ResponseMsg {
     pub value: String,
 }
 
-// #[derive(Debug, Serialize, Deserialize)]
-// pub struct InfoAgent {
-//     pub party_num: u32,
-//     pub url: String,
-// }
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct AgentResponse {
+    pub party_num: u16,
+    pub msg: String,
+}
 
 #[allow(dead_code)]
 pub fn aes_encrypt(key: &[u8], plaintext: &[u8]) -> AEAD {
@@ -94,37 +98,13 @@ pub fn aes_decrypt(key: &[u8], aead_pack: AEAD) -> Vec<u8> {
     out.unwrap()
 }
 
-pub fn postb<T>(client: &Client, path: &str, body: T) -> Option<String>
-where
-    T: serde::ser::Serialize,
-{
-    let addr = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "http://127.0.0.1:8001".to_string());
-    let retries = 3;
-    let retry_delay = time::Duration::from_millis(250);
-    for _i in 1..retries {
-        let res = client
-            .post(&format!("{}/{}", addr, path))
-            .json(&body)
-            .send();
-
-        if let Ok(mut res) = res {
-            return Some(res.text().unwrap());
-        }
-        thread::sleep(retry_delay);
-    }
-    None
-}
-
 pub async fn set(url: &str, key: &str, value: &str) -> String {
     let clinet = EcdsaManagerServiceClient::connect(format!("http://{}", url)).await;
     let request = tonic::Request::new(SetRequest {
         key: key.to_string(),
         value: value.to_string(),
     });
-    info!("set call");
-    println!("debug::set call!!");
+    info!("set(key: {:?}) call", key);
     let response = clinet.expect("EcdsaManagerServiceClient Connect Error.").set(request).await;
     response.expect("EcdsaManagerServiceClient get error.").into_inner().msg
 }
@@ -148,26 +128,10 @@ pub fn broadcast(
     sender_uuid: String,
 ) -> String {
     let key = format!("{}-{}-{}", party_num, round, sender_uuid);
-    println!("debug::broadcast call!");
+    info!("broadcast(key: {}) call", key);
     task::block_in_place(|| {
         Handle::current().block_on(set(&url, &key, &data))
     })
-}
-
-pub fn sendp2p(
-    client: &Client,
-    party_from: u16,
-    party_to: u16,
-    round: &str,
-    data: String,
-    sender_uuid: String,
-) -> Result<(), ()> {
-    let key = format!("{}-{}-{}-{}", party_from, party_to, round, sender_uuid);
-
-    let entry = Entry { key, value: data };
-
-    let res_body = postb(client, "set", entry).unwrap();
-    serde_json::from_str(&res_body).unwrap()
 }
 
 pub async fn poll_for_broadcasts (
@@ -213,31 +177,101 @@ pub fn poll (
     })
 }
 
-pub fn poll_for_p2p(
-    client: &Client,
+pub fn get_aeads (
     party_num: u16,
-    n: u16,
+    info_agents: Vec<InfoAgent>,
+    round: &str,
     delay: Duration,
+    sender_uuid: String,
+) -> Vec<AEAD> {
+    let tries_count: usize = 10;
+    let other_agent_values_len: usize = info_agents.len() - 1;
+
+    for idx in 0..tries_count {
+        println!("[debug] P2P 통신 시도: {:?}", idx);
+        thread::sleep(delay);
+        let mut success_count = 0;
+        let mut ans_response_vec = get_value_to_agents(
+                                    party_num.try_into().unwrap(), 
+                                    info_agents.clone(), 
+                                    round.clone(), 
+                                    sender_uuid.clone());
+        ans_response_vec.sort_by(|a, b| a.party_num.cmp(&b.party_num));
+        let aead_vec: Vec<AEAD> = ans_response_vec.iter().map(|response| {
+            let msg: ResponseMsg = serde_json::from_str(&response.msg).unwrap();
+            let status = msg.status;
+            let value = msg.value;
+            let aead: AEAD = serde_json::from_str(&value).unwrap();
+            if "success" == status {
+                success_count += 1;
+                println!("[deubg] GetKey Success! (count: {:?})", success_count);
+            }
+            aead
+        }).collect();
+
+        if other_agent_values_len == success_count {
+            println!("[deubg] 모든 통신 성공! (Agent 수: {:?}, 성공 횟수: {:?})", other_agent_values_len, success_count);
+            return aead_vec;
+        }
+        // println!("[debug] ans_vec_aead : {:?}", ans_vec_aead)
+    }
+    // 실패했을 경우 빈 Vec 리턴
+    Vec::new()
+}
+
+pub fn get_value_to_agents(
+    party_num: u16,
+    info_agents: Vec<InfoAgent>,
     round: &str,
     sender_uuid: String,
-) -> Vec<String> {
+) -> Vec<AgentResponse> {
+    debug!("arg::party_num{:?})", party_num);
+    debug!("arg::info_agents{:?})", info_agents);
+    debug!("arg::round{:?})", round);
+    debug!("arg::sender_uuid{:?})", sender_uuid);
     let mut ans_vec = Vec::new();
-    for i in 1..=n {
-        if i != party_num {
-            let key = format!("{}-{}-{}-{}", i, party_num, round, sender_uuid);
-            let index = Index { key };
-            loop {
-                // add delay to allow the server to process request:
-                thread::sleep(delay);
-                let res_body = postb(client, "get", index.clone()).unwrap();
-                let answer: Result<Entry, ()> = serde_json::from_str(&res_body).unwrap();
-                if let Ok(answer) = answer {
-                    ans_vec.push(answer.value);
-                    println!("[{:?}] party {:?} => party {:?}", round, i, party_num);
-                    break;
-                }
-            }
+    let other_agent_len = info_agents.len() - 1;
+    let (sender, receiver) = std::sync::mpsc::channel();
+
+    for (idx, info_agent) in info_agents.iter().enumerate() {
+        let agent_party_num = u16::from_str(&info_agent.party_num).unwrap();
+        if party_num != agent_party_num {
+            let agent_url = info_agent.url.clone();
+            let key = format!(
+                "{}-{}-{}-{}", 
+                agent_party_num, 
+                party_num,
+                round,
+                sender_uuid.clone()
+            );
+            let sender_new = sender.clone();
+            task::spawn(async move {
+                let response = get_value_to_agent(&agent_url, &key).await;
+                let msg = response.unwrap().msg;
+                let result = AgentResponse{party_num: agent_party_num, msg: msg};
+                sender_new.send(result).unwrap();
+            });
         }
     }
+
+    for idx in 0..other_agent_len {
+        ans_vec.push(receiver.recv_timeout(Duration::from_secs(5)).unwrap());
+        // ans_vec.push(receiver.recv().unwrap());
+    }
+
     ans_vec
+}
+
+pub async fn get_value_to_agent(
+    url: &str,
+    key: &str,
+) -> Result<BaseResponse, Box<dyn std::error::Error>> {
+    debug!("arg(url: {:?}, key: {:?})", url, key);
+    let mut client = EcdsaAgentServiceClient::connect(format!("http://{}", url))
+                                                        .await.expect("agent connect error");
+    let request = tonic::Request::new(GetKeyRequest {
+        key: key.to_string(),
+    });
+    let response = client.get_key(request).await?.into_inner();
+    Ok(response)
 }
