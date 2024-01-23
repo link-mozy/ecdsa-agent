@@ -1,3 +1,4 @@
+use crate::common::Config;
 use crate::{server, utils};
 use crate::server::{EcdsaAgentServer, SERVER_LOCK_TIME_OUT_DEFAULT, SERVER_TASK_GET_BACK_TIME_OUT_DEFAULT, SERVER_EXIT_TIME_OUT_AFTER_TASK_DONE_DEFAULT};
 
@@ -12,7 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 
 
 pub fn run(
-    port: String,
+    config: Config,
     server_lock_time_out: Duration,
     server_task_get_back_time_out: Duration,
     server_exit_time_out_after_task_done: Duration,
@@ -22,11 +23,13 @@ pub fn run(
         .unwrap();
     // listening server exit signal
     let (server_exit_tx, server_exit_rx) = oneshot::channel::<String>();
-
+    
     let (run_task_tx, run_task_rx) = mpsc::unbounded_channel::<String>();
-
+    
     let sv = EcdsaAgentServer::new(run_task_tx);
-
+    let _ = sv.set_server_config(config.clone()); // server config setting
+    let port = config.port.clone().to_string();
+    
     if server_lock_time_out != SERVER_LOCK_TIME_OUT_DEFAULT
     && server_task_get_back_time_out != SERVER_TASK_GET_BACK_TIME_OUT_DEFAULT
     && server_exit_time_out_after_task_done != SERVER_EXIT_TIME_OUT_AFTER_TASK_DONE_DEFAULT

@@ -69,6 +69,24 @@ pub struct AgentResponse {
     pub msg: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Config {
+    pub port: u32,
+    pub manager_url: String,
+    pub keyfile_path: String,
+}
+
+// Config file default Content
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            port: 4501,
+            manager_url: "127.0.0.1:4500".to_string(),
+            keyfile_path: "key.store".to_string(),
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub fn aes_encrypt(key: &[u8], plaintext: &[u8]) -> AEAD {
     let aes_key = aes_gcm::Key::from_slice(key);

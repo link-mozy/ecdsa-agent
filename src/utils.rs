@@ -7,6 +7,8 @@ use std::{
     process,
 };
 
+use crate::common::Config;
+
 pub fn is_file_lock_exist(port: &str) -> bool {
     let lock_path = lock_file_path(port);
     info!("lock_path: {:?}", lock_path.clone().as_path());
@@ -78,4 +80,9 @@ pub fn read_pid(path: String) -> u32 {
         }
         Err(_) => 0,
     }
+}
+
+pub fn get_config(path: String) -> Config {
+    let config_file = std::fs::File::open(path.clone()).expect(&format!("Could not open {path} file."));
+    serde_yaml::from_reader(config_file).expect("Could not read Config values.")
 }

@@ -30,3 +30,6 @@ src/*_grpc.rs
 
 # key file
 *.store
+
+# custom file
+config[0-9]*.yml

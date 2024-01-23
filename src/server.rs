@@ -1,5 +1,5 @@
 use crate::error;
-use crate::common::{Key, AEAD, broadcast, poll, aes_encrypt, get_aeads, aes_decrypt};
+use crate::common::{Key, AEAD, broadcast, poll, aes_encrypt, get_aeads, aes_decrypt, Config};
 use crate::ecdsa_agent_grpc::{RunKeygenRequest, GetKeyRequest, BaseResponse, InfoAgent};
 use crate::ecdsa_agent_grpc::ecdsa_agent_service_server::{EcdsaAgentService, EcdsaAgentServiceServer};
 use crate::status::{ServerStatus};
@@ -13,7 +13,7 @@ use std::fs;
 use log::info;
 use serde_json::json;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::{oneshot};
+use tokio::sync::oneshot;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 use futures::future::FutureExt;
@@ -53,6 +53,7 @@ pub struct ServerInfo {
     pub server_lock_time_out: Duration,
     pub server_task_get_back_time_out: Duration,
     pub server_exit_time_out_after_task_done: Duration,
+    pub config: Config,
     pub error: String,
 }
 
@@ -65,6 +66,7 @@ impl Default for ServerInfo {
             server_lock_time_out: SERVER_LOCK_TIME_OUT_DEFAULT,
             server_task_get_back_time_out: SERVER_TASK_GET_BACK_TIME_OUT_DEFAULT,
             server_exit_time_out_after_task_done: SERVER_EXIT_TIME_OUT_AFTER_TASK_DONE_DEFAULT,
+            config: Config::default(),
             error: String::default(),
         }
     }
@@ -135,6 +137,20 @@ impl EcdsaAgentServer {
             }
         };
         si.server_exit_time_out_after_task_done = time_out;
+        Ok(())
+    }
+
+    pub fn set_server_config(
+        &self,
+        config: Config
+    ) -> anyhow::Result<()> {
+        let mut si = match self.server_info.lock() {
+            Ok(s) => s,
+            Err(e) => {
+                return Err(anyhow::Error::msg(e.to_string()));
+            }
+        };
+        si.config = config;
         Ok(())
     }
     
@@ -234,7 +250,7 @@ impl EcdsaAgentServer {
     fn unlock(
         &self
     ) -> Result<(), Status> {
-        let mut si = match self.server_info.lock() {
+        let si = match self.server_info.lock() {
             Ok(s) => s,
             Err(e) => {
                 return Err(Status::aborted(e.to_string()));
@@ -268,10 +284,12 @@ impl EcdsaAgentService for EcdsaAgentServer {
         let threshold: u16 = <u16 as FromStr>::from_str(&req.threshold).unwrap();
         let parties: u16 = <u16 as FromStr>::from_str(&req.parties).unwrap();
         let info_agents: Vec<InfoAgent> = req.info_agents;
+        let mut config: Config;
         { // mutext open
             let si = self.server_info.lock().unwrap();
             let mut hm = si.storage.write().unwrap();
             hm.insert(uuid.clone(), party_number.to_string());
+            config = si.config.clone();
         } // mutext close
 
         info!("run_keygen call. [uuid: {:?}]", uuid);
@@ -282,8 +300,8 @@ impl EcdsaAgentService for EcdsaAgentServer {
         println!("parties: {:?}", parties);
         println!("info_agents: {:?}", info_agents);
 
-        // TODO. Configuration 사용하도록 수정 필요.
-        let server_url = "127.0.0.1:4500";
+        let server_url = config.manager_url.clone();
+        let keyfile_path = config.keyfile_path.clone();
 
         // delay:
         let delay = Duration::from_millis(500);
@@ -507,8 +525,6 @@ impl EcdsaAgentService for EcdsaAgentServer {
         ))
         .unwrap();
 
-        // TODO. 파일 저장 위치 받아와야 함.
-        let keyfile_path = format!("key_{}.store", party_number);
         println!("Keys data written to file: {:?}", keyfile_path);
         fs::write(&keyfile_path, keygen_json).expect("Unable to save !");
         

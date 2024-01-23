@@ -1,0 +1,3 @@
+port : 4501
+manager_url : 127.0.0.1:4500
+keyfile_path : key-1.store
